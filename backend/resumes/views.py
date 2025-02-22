@@ -38,6 +38,7 @@ class ResumeViewSet(viewsets.ModelViewSet):
                     {'error': 'No file provided'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
+            print('resume_file', resume_file)
 
             # Get original file extension
             file_extension = os.path.splitext(resume_file.name)[1]
@@ -47,6 +48,7 @@ class ResumeViewSet(viewsets.ModelViewSet):
                 for chunk in resume_file.chunks():
                     temp_file.write(chunk)
                 temp_file_path = temp_file.name
+                print('temp_file_path', temp_file_path)
 
             try:
                 # Extract text from the resume
@@ -65,6 +67,7 @@ class ResumeViewSet(viewsets.ModelViewSet):
                     'resume_file': resume_file,
                     'resume_content': resume_text or ''
                 }
+                print('extracted_data', extracted_data)
 
                 # Create and save the Resume instance
                 serializer = self.get_serializer(data=extracted_data)
