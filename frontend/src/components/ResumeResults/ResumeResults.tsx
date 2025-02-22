@@ -1,4 +1,4 @@
-import { Resume } from '../types';
+import { Resume } from '../../types';
 import './ResumeResults.css';
 
 interface ResumeResultsProps {

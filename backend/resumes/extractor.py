@@ -1,6 +1,8 @@
+from pyresparser import ResumeParser
 import spacy
 import re
-nlp = spacy.load("en_core_web_sm")
+
+nlp = spacy.load("en_core_web_lg")  # Upgrade to larger model
 
 def extract_candidate_name(text):
     # Process the first few lines of text to find the name
@@ -82,23 +84,22 @@ def extract_job_title(text):
     return None
 
 def extract_companies(text):
-    companies = []
-    experience_keywords = ['experience', 'employment', 'work history']
-    lines = text.lower().split('\n')
-    
-    # Find the experience section
-    for i, line in enumerate(lines):
-        if any(keyword in line.lower() for keyword in experience_keywords):
-            # Look at the next 10 lines for company names
-            potential_companies = lines[i+1:i+11]
-            for company_line in potential_companies:
-                # Skip empty lines and lines with common words
-                if (company_line.strip() and 
-                    not any(word in company_line.lower() for word in 
-                        ['experience', 'responsibilities', 'skills', 'education'])):
-                    companies.append(company_line.strip())
-    
-    return list(set(companies))[:3]  # Return up to 3 unique companies
+   # Step 1: Extract organizations using NER
+    doc = nlp(text)
+    companies = [ent.text for ent in doc.ents if ent.label_ == "ORG"]
+    print("companies", companies)
+    # Step 2: Custom regex pattern to catch missed company names
+    custom_pattern = r'\b[A-Z][a-zA-Z&,\s]+(?:Inc\.|LLC|Limited|Ltd\.|Corporation|Corp\.)\b'
+    custom_matches = re.findall(custom_pattern, text)
+
+    # Step 3: Combine and remove duplicates
+    all_companies = list(set(companies + custom_matches))
+
+    # Step 4: Optional filtering (remove universities or non-companies)
+    exclude_keywords = ["Institute", "University", "College"]
+    final_companies = [name for name in all_companies if not any(keyword in name for keyword in exclude_keywords)]
+
+    return final_companies
 
 def extract_experience(text):
     # Look for years of experience patterns
@@ -140,4 +141,49 @@ def extract_education(text):
                 if edu_line.strip() and not any(keyword in edu_line.lower() for keyword in ['education']):
                     return edu_line.strip()
     return None
+
+def parse_resume(text, file_path=None):
+    """
+    Main function to parse resume using pyresparser and fall back to custom extraction
+    if needed
+    """
+    parsed_data = {}
+    
+    if file_path:
+        # PyResParser works better with actual files
+        try:
+            parser_data = ResumeParser(file_path).get_extracted_data()
+            print("parser_data2", parser_data)
+            parsed_data = {
+                'name': parser_data.get('name'),
+                'email': parser_data.get('email'),
+                'phone': parser_data.get('mobile_number'),
+                'skills': parser_data.get('skills'),
+                'education': parser_data.get('degree'),
+                'experience': parser_data.get('total_experience'),
+                'companies': parser_data.get('company_names'),
+                'job_title': parser_data.get('designation')
+            }
+        except Exception as e:
+            print(f"Error parsing resume: {e}")
+            return parsed_data
+    
+
+    # Fall back to custom extraction for missing fields
+    if not parsed_data.get('name'):
+        parsed_data['name'] = extract_candidate_name(text)
+    if not parsed_data.get('email'):
+        parsed_data['email'] = extract_email(text)
+    if not parsed_data.get('phone'):
+        parsed_data['phone'] = extract_phone(text)
+    if not parsed_data.get('skills'):
+        parsed_data['skills'] = extract_skills(text)
+    if not parsed_data.get('job_title'):
+        parsed_data['job_title'] = extract_job_title(text)
+    if not parsed_data.get('companies'):
+        parsed_data['companies'] = extract_companies(text)
+    if not parsed_data.get('experience'):
+        parsed_data['experience'] = extract_experience(text)
+    
+    return parsed_data
 

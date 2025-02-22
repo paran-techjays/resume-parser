@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ResumeUpload } from './components/ResumeUpload';
-import { ResumeSearch } from './components/ResumeSearch';
-import { ResumeResults } from './components/ResumeResults';
+import { ResumeSearch } from './components/ResumeSearch/ResumeSearch';
+import { ResumeResults } from './components/ResumeResults/ResumeResults';
 import { resumeApi } from './services/api';
 import { Resume, SearchFormValues } from './types';
 import './App.css';

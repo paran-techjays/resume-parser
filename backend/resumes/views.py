@@ -14,6 +14,13 @@ from .extractor import (
 from django.core.files.storage import default_storage
 import tempfile
 import os
+from concurrent.futures import ThreadPoolExecutor
+from django.conf import settings
+from .extractor import parse_resume
+from .config import create_config_file
+
+# Add this at the start of your views.py
+create_config_file()
 
 # Create your views here.
 class ResumeViewSet(viewsets.ModelViewSet):
@@ -27,19 +34,9 @@ class ResumeViewSet(viewsets.ModelViewSet):
     # def get_serializer_class(self):
     #     return ResumeSerializer
 
-    @action(detail=False, methods=['POST'])
-    def upload(self, request):
+    def process_resume(self, resume_file):
+        """Process a single resume file and return extracted data"""
         try:
-            # Get the uploaded file
-            print(request.FILES)
-            resume_file = request.FILES.get('resume')
-            if not resume_file:
-                return Response(
-                    {'error': 'No file provided'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            print('resume_file', resume_file)
-
             # Get original file extension
             file_extension = os.path.splitext(resume_file.name)[1]
             
@@ -48,7 +45,6 @@ class ResumeViewSet(viewsets.ModelViewSet):
                 for chunk in resume_file.chunks():
                     temp_file.write(chunk)
                 temp_file_path = temp_file.name
-                print('temp_file_path', temp_file_path)
 
             try:
                 # Extract text from the resume
@@ -84,10 +80,68 @@ class ResumeViewSet(viewsets.ModelViewSet):
                 os.unlink(temp_file_path)
 
         except Exception as e:
+            return None, str(e)
+
+    @action(detail=False, methods=['POST'])
+    def upload(self, request):
+        files = request.FILES.getlist('resume')
+        if not files:
             return Response(
-                {'error': str(e)},
+                {'error': 'No files provided'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        results = []
+        max_workers = getattr(settings, 'MAX_RESUME_PROCESSING_WORKERS', 4)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Process resumes in parallel
+            future_to_file = {
+                executor.submit(self.process_resume, resume_file): resume_file
+                for resume_file in files
+            }
+
+            for future in future_to_file:
+                resume_file = future_to_file[future]
+                try:
+                    extracted_data, error = future.result()
+                    if error:
+                        results.append({
+                            'filename': resume_file.name,
+                            'status': 'error',
+                            'error': error
+                        })
+                    else:
+                        # Create and save the Resume instance
+                        serializer = self.get_serializer(data=extracted_data)
+                        if serializer.is_valid():
+                            serializer.save()
+                            results.append({
+                                'filename': resume_file.name,
+                                'status': 'success',
+                                'data': serializer.data
+                            })
+                        else:
+                            results.append({
+                                'filename': resume_file.name,
+                                'status': 'error',
+                                'error': serializer.errors
+                            })
+                except Exception as e:
+                    results.append({
+                        'filename': resume_file.name,
+                        'status': 'error',
+                        'error': str(e)
+                    })
+
+        # Return summary of all operations
+        success_count = sum(1 for r in results if r['status'] == 'success')
+        return Response({
+            'total': len(files),
+            'successful': success_count,
+            'failed': len(files) - success_count,
+            'results': results
+        }, status=status.HTTP_200_OK)
 
 class ResumeSearchView(generics.ListAPIView):
     serializer_class = ResumeSerializer

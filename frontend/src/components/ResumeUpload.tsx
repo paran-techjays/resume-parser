@@ -7,34 +7,59 @@ interface ResumeUploadProps {
 }
 
 export const ResumeUpload = ({ onUploadSuccess }: ResumeUploadProps) => {
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<FileList | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ total: number; processed: number } | null>(null);
 
   const handleUpload = async () => {
-    if (!file) return;
+    if (!files || files.length === 0) return;
     setIsLoading(true);
     setError(null);
+    setProgress({ total: files.length, processed: 0 });
 
     try {
-      await resumeApi.uploadResume(file);
-      alert('Resume uploaded successfully!');
-      setFile(null);
+      const uploadPromises = Array.from(files).map(async (file, index) => {
+        try {
+          await resumeApi.uploadResume(file);
+          setProgress(prev => prev ? { ...prev, processed: prev.processed + 1 } : null);
+        } catch (error) {
+          console.error(`Error uploading ${file.name}:`, error);
+          return file.name; // Return filename if upload failed
+        }
+      });
+
+      const results = await Promise.all(uploadPromises);
+      const failedUploads = results.filter(Boolean);
+
+      if (failedUploads.length > 0) {
+        setError(`Failed to upload: ${failedUploads.join(', ')}`);
+      } else {
+        alert('All resumes uploaded successfully!');
+      }
+
+      setFiles(null);
       onUploadSuccess();
     } catch (error) {
-      setError('Error uploading resume. Please try again.');
-      console.error('Error uploading resume:', error);
+      setError('Error uploading resumes. Please try again.');
+      console.error('Error uploading resumes:', error);
     } finally {
       setIsLoading(false);
+      setProgress(null);
     }
   };
 
   return (
     <section className="upload-section">
-      <h2>Upload Resume</h2>
+      <h2>Upload Resumes</h2>
       {error && <div className="error-message">{error}</div>}
+      {progress && (
+        <div className="progress-bar">
+          Processing: {progress.processed} / {progress.total} resumes
+        </div>
+      )}
       <Formik
-        initialValues={{ file: null }}
+        initialValues={{ files: null }}
         onSubmit={() => handleUpload()}
       >
         {({ setFieldValue }) => (
@@ -42,12 +67,16 @@ export const ResumeUpload = ({ onUploadSuccess }: ResumeUploadProps) => {
             <input
               type="file"
               accept=".pdf,.doc,.docx"
+              multiple
               onChange={(e) => {
-                setFile(e.target.files?.[0] || null);
-                setFieldValue('file', e.target.files?.[0] || null);
+                setFiles(e.target.files);
+                setFieldValue('files', e.target.files);
               }}
             />
-            <button type="submit" disabled={!file || isLoading}>
+            <button 
+              type="submit" 
+              disabled={!files || files.length === 0 || isLoading}
+            >
               {isLoading ? 'Uploading...' : 'Upload'}
             </button>
           </Form>
